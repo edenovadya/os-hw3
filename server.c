@@ -1,6 +1,7 @@
 #include "segel.h"
 #include "request.h"
 #include "log.h"
+#include <sys/time.h>
 
 //
 // server.c: A very, very simple web server
@@ -11,6 +12,12 @@
 // Repeatedly handles HTTP requests sent to this port number.
 // Most of the work is done within routines written in request.c
 //
+
+
+typedef struct {
+    int socket;
+    struct timeval arrival;
+} request;
 
 // Parses command-line arguments
 void getargs(int *port, int argc, char *argv[])
@@ -78,7 +85,41 @@ int main(int argc, char *argv[])
     // TODO: HW3 — Add cleanup code for thread pool and queue
 }
 
-void worker(struct queue*,server_log log){
-    requ dequeue(queue);
+struct queue;
+void worker(void* arg_struct){
+
+    worker_args* args = (worker_args*)arg_struct;
+
+    struct queue* q = args->q;
+    server_log* log = args->log;
+    pthread_mutex_t* mutex = args->mutex;
+    pthread_cond_t* is_empty = args->is_empty;
+    pthread_cond_t* is_full = args->is_full;
+    threads_stats t_stats = args->t_stats;//todo ?
+
+    request current_request;
+    while(1){
+        mutex_lock(mutex);
+        while (isEmpty(q)) {
+            cond_wait(cond, mutex);
+        }
+        if(isFull){
+            current_request = dequeue(q);
+            cond_signal(is_full);
+        }else{
+            current_request = dequeue(q);
+        }
+
+        mutex_unlock(mutex);
+
+        struct timeval now;
+
+        if (gettimeofday(&now, NULL) != 0) {
+            perror("gettimeofday failed");
+        }
+
+        requestHandle(current_request.socket, current_request.arrival, now,
+                      threads_stats t_stats, *log); //todo stats
+    }
 
 }
