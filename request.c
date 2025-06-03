@@ -212,30 +212,37 @@ void requestHandle(int fd, struct timeval arrival, struct timeval dispatch, thre
             return;
         }
 
+
         if (is_static) {
+        	t_stats->total_req++;
+
             if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
                 requestError(fd, filename, "403", "Forbidden",
                              "OS-HW3 Server could not read this file",
                              arrival, dispatch, t_stats);
                 return;
             }
+        	t_stats->stat_req++;
 
             requestServeStatic(fd, filename, sbuf.st_size, arrival, dispatch, t_stats);
 
         } else {
+        	t_stats->total_req++;
             if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
                 requestError(fd, filename, "403", "Forbidden",
                              "OS-HW3 Server could not run this CGI program",
                              arrival, dispatch, t_stats);
                 return;
             }
-
+        	t_stats->dynm_req++;
             requestServeDynamic(fd, filename, cgiargs, arrival, dispatch, t_stats);
         }
 
         // TODO: add log entry using add_to_log(server_log log, const char* data, int data_len);
 
     } else if (!strcasecmp(method, "POST")) {
+    	t_stats->total_req++;
+    	t_stats->post_req++;
         requestServePost(fd, arrival, dispatch, t_stats, log);
 
     } else {
