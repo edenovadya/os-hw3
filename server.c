@@ -20,16 +20,30 @@ typedef struct {
 } request;
 
 // Parses command-line arguments
-void getargs(int *port, int argc, char *argv[])
+void getargs(int *port, int* threads_num , int* queue_size, int argc, char *argv[])
 {
     if (argc < 2) {
         fprintf(stderr, "Usage: %s <port>\n", argv[0]);
         exit(1);
     }
     *port = atoi(argv[1]);
+    *threads_num = atoi(argv[2]);
+    *queue_size = atoi(argv[3]);
 }
 // TODO: HW3 — Initialize thread pool and request queue
 
+typedef struct {
+    struct queue* request_queue;
+    server_log* log;
+    pthread_mutex_t* mutex;
+    pthread_cond_t* cond;
+    threads_stats t_stats;
+    int thread_id;
+} worker_args;
+
+extern pthread_mutex_t mutex;
+extern pthread_cond_t is_empty;
+extern pthread_cond_t is_full;
 
 
 // This server currently handles all requests in the main thread.
@@ -38,21 +52,61 @@ void getargs(int *port, int argc, char *argv[])
 
 int main(int argc, char *argv[])
 {
+
+    int listenfd, connfd, port, threads_num, queue_size, clientlen;
+    struct sockaddr_in clientaddr;
+    struct timeval arrival_time;
+    getargs(&port, &threads_num, &queue_size, argc, argv);
+    pthread_mutex_init(&mutex, NULL);
+    pthread_cond_init(&is_empty, NULL);
+    pthread_cond_init(&is_full, NULL);
+
     // Create the global server log
     server_log log = create_log();
 
-    int listenfd, connfd, port, clientlen;
-    struct sockaddr_in clientaddr;
+    //creat queue
+    Queue* request_queue = make_queue();
 
-    getargs(&port, argc, argv);
+    //creat threads pool
+    pthread_t *threads = malloc(threads_num * sizeof(pthread_t));
+    for (int i = 0; i < threads_num; i++) {
+        worker_args *arg_to_worker = malloc(sizeof(worker_args));
+        if (arg_to_worker == NULL) {
+            perror("malloc failed");
+            exit(1);
+        }
 
+        arg_to_worker->cond = &is_empty;
+        arg_to_worker->thread_id = i;
+        arg_to_worker->request_queue = request_queue;
+        arg_to_worker->log = &log;
+        arg_to_worker->mutex = &mutex;
 
+        if (pthread_create(&threads[i], NULL, worker, arg_to_worker) != 0) {
+            perror("pthread_create failed");
+            exit(1);
+        }
+    }
 
     listenfd = Open_listenfd(port);
     while (1) {
         clientlen = sizeof(clientaddr);
         connfd = Accept(listenfd, (SA *)&clientaddr, (socklen_t *) &clientlen);
+        struct timeval now;
+        if (gettimeofday(&now, NULL) != 0) {
+            perror("gettimeofday failed");
+        }
 
+
+        pthread_mutex_lock(&mutex);
+        while (getSize(request_queue) >= queue_size) {
+            pthread_cond_wait(&is_full, &mutex);
+        }
+
+        enqueue(request_queue, connfd, now);
+        pthread_cond_signal(&is_empty);
+        pthread_mutex_unlock(&mutex);
+    }
         // TODO: HW3 — Record the request arrival time here
 
         // DEMO PURPOSE ONLY:
@@ -84,7 +138,6 @@ int main(int argc, char *argv[])
 
     // TODO: HW3 — Add cleanup code for thread pool and queue
 }
-
 struct queue;
 void worker(void* arg_struct){
 
