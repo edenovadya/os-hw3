@@ -115,6 +115,7 @@ int get_log(struct server_log* log, char** dst) {
         reader_unlock(log);
         return len;
     }
+    *dst = (char*)malloc(len + 1);
     (*dst)[0] = '\0';
     curr = log->head;
     while (curr != NULL) {
