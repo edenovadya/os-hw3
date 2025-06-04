@@ -3,7 +3,6 @@
 #include "log.h"
 
 
-
 void readers_writers_init(struct Server_Log* log) {
     log->readers_inside = 0;
     log->writers_inside = 0;

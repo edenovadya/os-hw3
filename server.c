@@ -22,7 +22,7 @@ typedef struct {
 // Parses command-line arguments
 void getargs(int *port, int* threads_num , int* queue_size, int argc, char *argv[])
 {
-    if (argc < 2) {
+    if (argc < 4) {
         fprintf(stderr, "Usage: %s <port>\n", argv[0]);
         exit(1);
     }
@@ -139,8 +139,7 @@ int main(int argc, char *argv[])
     // TODO: HW3 — Add cleanup code for thread pool and queue
 }
 struct queue;
-void worker(void* arg_struct){
-
+void* worker(void* arg_struct) {
     worker_args* args = (worker_args*)arg_struct;
 
     struct queue* q = args->q;
@@ -148,31 +147,30 @@ void worker(void* arg_struct){
     pthread_mutex_t* mutex = args->mutex;
     pthread_cond_t* is_empty = args->is_empty;
     pthread_cond_t* is_full = args->is_full;
-    threads_stats t_stats = args->t_stats;//todo ?
+    threads_stats thread_stats = args->t_stats;
+    int ind = args->thread_index;
+
+    thread_stats->id = ind;
+    thread_stats->dynm_req = 0;
+    thread_stats->stat_req = 0;
+    thread_stats->total_req = 0;
 
     request current_request;
-    while(1){
-        mutex_lock(mutex);
+    while (1) {
+        pthread_mutex_lock(mutex);
         while (isEmpty(q)) {
-            cond_wait(cond, mutex);
-        }
-        if(isFull){
-            current_request = dequeue(q);
-            cond_signal(is_full);
-        }else{
-            current_request = dequeue(q);
+            pthread_cond_wait(is_empty, mutex);
         }
 
-        mutex_unlock(mutex);
+        current_request = dequeue(q);
+        pthread_cond_signal(is_full);
+        pthread_mutex_unlock(mutex);
 
         struct timeval now;
-
-        if (gettimeofday(&now, NULL) != 0) {
-            perror("gettimeofday failed");
-        }
+        gettimeofday(&now, NULL);
 
         requestHandle(current_request.socket, current_request.arrival, now,
-                      threads_stats t_stats, *log); //todo stats
+                      thread_stats, *log);
     }
-
+    return NULL;
 }
