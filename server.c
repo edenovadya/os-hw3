@@ -62,7 +62,7 @@ int main(int argc, char *argv[])
     pthread_cond_init(&is_full, NULL);
 
     // Create the global server log
-    server_log log = create_log();
+    server_log* log = create_log();
 
     //creat queue
     Queue* request_queue = make_queue();
@@ -79,7 +79,7 @@ int main(int argc, char *argv[])
         arg_to_worker->cond = &is_empty;
         arg_to_worker->thread_id = i;
         arg_to_worker->request_queue = request_queue;
-        arg_to_worker->log = &log;
+        arg_to_worker->log = log;
         arg_to_worker->mutex = &mutex;
 
         if (pthread_create(&threads[i], NULL, worker, arg_to_worker) != 0) {

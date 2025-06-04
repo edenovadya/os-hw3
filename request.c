@@ -122,7 +122,8 @@ void requestGetFiletype(char *filename, char *filetype)
 		strcpy(filetype, "text/plain");
 }
 
-void requestServeDynamic(int fd, char *filename, char *cgiargs, struct timeval arrival, struct timeval dispatch, threads_stats t_stats)
+int requestServeDynamic(int fd, char *filename, char *cgiargs, struct timeval
+        arrival, struct timeval dispatch, threads_stats t_stats,char* buff)
 {
 	char buf[MAXLINE], *emptylist[] = {NULL};
 
@@ -131,6 +132,7 @@ void requestServeDynamic(int fd, char *filename, char *cgiargs, struct timeval a
 	sprintf(buf, "HTTP/1.0 200 OK\r\n");
 	sprintf(buf, "%sServer: OS-HW3 Web Server\r\n", buf);
     int buf_len = append_stats(buf, t_stats, arrival, dispatch);
+
 
     Rio_writen(fd, buf, buf_len);
    	int pid = 0;
@@ -145,10 +147,11 @@ void requestServeDynamic(int fd, char *filename, char *cgiargs, struct timeval a
 }
 
 
-void requestServeStatic(int fd, char *filename, int filesize, struct timeval arrival, struct timeval dispatch, threads_stats t_stats)
+int requestServeStatic(int fd, char *filename, int filesize, struct timeval
+        arrival, struct timeval dispatch, threads_stats t_stats,char* buf)
 {
 	int srcfd;
-	char *srcp, filetype[MAXLINE], buf[MAXBUF];
+	char *srcp, filetype[MAXLINE];
 
 	requestGetFiletype(filename, filetype);
 
@@ -170,9 +173,11 @@ void requestServeStatic(int fd, char *filename, int filesize, struct timeval arr
 	//  Writes out to the client socket the memory-mapped file
 	Rio_writen(fd, srcp, filesize);
 	Munmap(srcp, filesize);
+    return buf_len;
 }
 
-void requestServePost(int fd,  struct timeval arrival, struct timeval dispatch, threads_stats t_stats, server_log log)
+void requestServePost(int fd,  struct timeval arrival, struct timeval
+        dispatch, threads_stats t_stats, server_log* log)
 {
     char header[MAXBUF], *body = NULL;
     int body_len = get_log(log, &body);
@@ -188,7 +193,8 @@ void requestServePost(int fd,  struct timeval arrival, struct timeval dispatch, 
 }
 
 // handle a request
-void requestHandle(int fd, struct timeval arrival, struct timeval dispatch, threads_stats t_stats, server_log log)
+void requestHandle(int fd, struct timeval arrival, struct timeval dispatch,
+        threads_stats t_stats, server_log* log)
 {
     // TODO:  should update static request stats
     int is_static;
@@ -196,6 +202,8 @@ void requestHandle(int fd, struct timeval arrival, struct timeval dispatch, thre
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char filename[MAXLINE], cgiargs[MAXLINE];
     rio_t rio;
+    char* log_buff[MAXBUF];
+    int log_buf_len = 0;
 
     Rio_readinitb(&rio, fd);
     Rio_readlineb(&rio, buf, MAXLINE);
@@ -224,7 +232,8 @@ void requestHandle(int fd, struct timeval arrival, struct timeval dispatch, thre
             }
         	t_stats->stat_req++;
 
-            requestServeStatic(fd, filename, sbuf.st_size, arrival, dispatch, t_stats);
+            log_buff_len = requestServeStatic(fd, filename, sbuf.st_size,
+                                              arrival, dispatch,t_stats,log_buff);
 
         } else {
         	t_stats->total_req++;
@@ -235,9 +244,12 @@ void requestHandle(int fd, struct timeval arrival, struct timeval dispatch, thre
                 return;
             }
         	t_stats->dynm_req++;
-            requestServeDynamic(fd, filename, cgiargs, arrival, dispatch, t_stats);
+            log_buff_len = requestServeDynamic(fd, filename, cgiargs, arrival,
+                                         dispatch, t_stats,log_buff);
         }
-
+        if(is_static){//TODO what if there are errors?
+            add_to_log(log, log_buff, log_buff_len);
+        }
         // TODO: add log entry using add_to_log(server_log log, const char* data, int data_len);
 
     } else if (!strcasecmp(method, "POST")) {

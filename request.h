@@ -26,6 +26,7 @@ typedef struct Threads_stats {
 //   - post_req (for POST requests)
 // - These values should reflect accurate request processing for each thread and be used in response headers/logs.
 
-void requestHandle(int fd, struct timeval arrival, struct timeval dispatch, threads_stats t_stats, server_log log);
+void requestHandle(int fd, struct timeval arrival, struct timeval dispatch,
+        threads_stats t_stats, server_log* log);
 
 #endif

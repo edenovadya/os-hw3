@@ -13,16 +13,16 @@
 typedef struct Server_Log* server_log;
 
 // Creates a new server log instance
-server_log create_log();
+server_log* create_log();
 
 // Destroys and frees the log
-void destroy_log(server_log log);
+void destroy_log(server_log* log);
 
 // Returns the log contents as a string (null-terminated)
 // NOTE: caller is responsible for freeing dst
-int get_log(server_log log, char** dst);
+int get_log(server_log* log, char** dst);
 
 // Appends a new entry to the log
-void add_to_log(server_log log, const char* data, int data_len);
+void add_to_log(server_log* log, const char* data, int data_len);
 
 #endif // SERVER_LOG_H
