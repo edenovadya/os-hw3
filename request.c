@@ -203,7 +203,7 @@ void requestHandle(int fd, struct timeval arrival, struct timeval dispatch,
     char filename[MAXLINE], cgiargs[MAXLINE];
     rio_t rio;
     char* log_buff[MAXBUF];
-    int log_buf_len = 0;
+    int log_buff_len = 0;
 
     Rio_readinitb(&rio, fd);
     Rio_readlineb(&rio, buf, MAXLINE);
