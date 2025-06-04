@@ -12,11 +12,9 @@
 // Repeatedly handles HTTP requests sent to this port number.
 // Most of the work is done within routines written in request.c
 //
-
-
 typedef struct {
-    int socket;
-    struct timeval arrival;
+   int socket;
+   struct timeval arrival;
 } request;
 
 // Parses command-line arguments
@@ -155,7 +153,7 @@ void* worker(void* arg_struct) {
     thread_stats->stat_req = 0;
     thread_stats->total_req = 0;
 
-    request current_request;
+    request* current_request;
     while (1) {
         pthread_mutex_lock(mutex);
         while (isEmpty(q)) {
