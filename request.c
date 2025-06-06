@@ -126,12 +126,13 @@ int requestServeDynamic(int fd, char *filename, char *cgiargs, struct timeval
         arrival, struct timeval dispatch, threads_stats t_stats,char* buff)
 {
 	char buf[MAXLINE], *emptylist[] = {NULL};
+	int buf_len;
 
 	// The server does only a little bit of the header.
 	// The CGI script has to finish writing out the header.
 	sprintf(buf, "HTTP/1.0 200 OK\r\n");
 	sprintf(buf, "%sServer: OS-HW3 Web Server\r\n", buf);
-    int buf_len = append_stats(buf, t_stats, arrival, dispatch);
+    buf_len = append_stats(buf, t_stats, arrival, dispatch);
 
 
     Rio_writen(fd, buf, buf_len);
@@ -144,6 +145,7 @@ int requestServeDynamic(int fd, char *filename, char *cgiargs, struct timeval
      	 Execve(filename, emptylist, environ);
    	}
   	WaitPid(pid, NULL, WUNTRACED);
+	return buf_len;
 }
 
 
@@ -202,7 +204,7 @@ void requestHandle(int fd, struct timeval arrival, struct timeval dispatch,
     char buf[MAXLINE], method[MAXLINE], uri[MAXLINE], version[MAXLINE];
     char filename[MAXLINE], cgiargs[MAXLINE];
     rio_t rio;
-    char* log_buff[MAXBUF];
+    char log_buff[MAXBUF];
     int log_buff_len = 0;
 
     Rio_readinitb(&rio, fd);
@@ -219,7 +221,6 @@ void requestHandle(int fd, struct timeval arrival, struct timeval dispatch,
                          arrival, dispatch, t_stats);
             return;
         }
-
 
         if (is_static) {
         	t_stats->total_req++;
@@ -247,9 +248,9 @@ void requestHandle(int fd, struct timeval arrival, struct timeval dispatch,
             log_buff_len = requestServeDynamic(fd, filename, cgiargs, arrival,
                                          dispatch, t_stats,log_buff);
         }
-        if(is_static){//TODO what if there are errors?
-            add_to_log(log, log_buff, log_buff_len);
-        }
+        //TODO what if there are errors?
+    	add_to_log(log, log_buff, log_buff_len);
+
         // TODO: add log entry using add_to_log(server_log log, const char* data, int data_len);
 
     } else if (!strcasecmp(method, "POST")) {

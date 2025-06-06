@@ -10,7 +10,23 @@
 // - Use appropriate synchronization primitives (e.g., pthread mutexes and condition variables).
 // - The log should allow appending entries and returning the full log content.
 
-typedef struct Server_Log* server_log;
+typedef struct Node {
+    struct Node* next;
+    char* log_data;
+} Node;
+
+
+typedef struct Server_Log {
+    int size;
+    Node* head;
+    Node* tail;
+    int readers_inside;
+    int writers_inside;
+    int writers_waiting;
+    pthread_mutex_t mutex_log;
+    pthread_cond_t read_allowed;
+    pthread_cond_t write_allowed;
+} server_log;
 
 // Creates a new server log instance
 server_log* create_log();

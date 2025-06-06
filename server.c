@@ -3,8 +3,8 @@
 #include "log.h"
 #include <sys/time.h>
 #include <stdbool.h>
+// ------------------------ Structs ------------------------
 
-void* worker(void* arg_struct);
 typedef struct {
     int socket;
     struct timeval arrival;
@@ -17,6 +17,24 @@ typedef struct {
     request* arr;
     request* next_request;
 } Queue;
+
+typedef struct {
+    Queue* request_queue;
+    server_log* log;
+    pthread_mutex_t* mutex;
+    pthread_cond_t* cond;
+    threads_stats t_stats;
+    int thread_id;
+} worker_args;
+
+
+// ------------------------ Global Sync ------------------------
+
+pthread_mutex_t mutex;
+pthread_cond_t is_empty;
+pthread_cond_t is_full;
+
+// ------------------------ Queue Functions ------------------------
 
 Queue* make_queue(int capacity) {
     Queue* q = malloc(sizeof(Queue));
@@ -40,44 +58,26 @@ Queue* make_queue(int capacity) {
 
 void enqueue(Queue* q, int conffd, struct timeval time) {
     if (q->size == q->capacity) {
-        //not supposed to haapen
+            //not supposed to haapen
     }
-
     q->next_available->socket = conffd;
     q->next_available->arrival = time;
 
     q->next_available++;
-    if (q->next_available == q->arr + q->capacity) {
+    if (q->next_available == q->arr + q->capacity)
         q->next_available = q->arr;
-    }
-
     q->size++;
-}
-
-
-
-void destroy_queue(Queue* q) {
-    if (!q) return;
-
-    if (q->arr) {
-        free(q->arr);
-    }
-
-    free(q);
 }
 
 request* dequeue(Queue* q) {
     if (q->size == 0) {
         //not supposed to happen
     }
-
     request* ret = q->next_request;
-
     q->next_request++;
-    if (q->next_request == q->arr + q->capacity) {
+    if (q->next_request == q->arr + q->capacity){
         q->next_request = q->arr;
     }
-
     q->size--;
     return ret;
 }
@@ -85,8 +85,58 @@ request* dequeue(Queue* q) {
 bool isEmpty(Queue* q) {
     return q->size == 0;
 }
+
 int getSize(Queue* q) {
     return q->size;
+}
+
+void destroy_queue(Queue* q) {
+    if (!q) {
+        return;
+    }
+
+    if (q) {
+        free(q->arr);
+        free(q);
+    }
+}
+
+// ------------------------ Worker Function ------------------------
+
+void* worker(void* arg_struct) {
+    worker_args* args = (worker_args*)arg_struct;
+
+    Queue* q = args->request_queue;
+    server_log* log = args->log;
+    threads_stats thread_stats = args->t_stats;
+    int ind = args->thread_id;
+
+    free(args);
+
+    thread_stats->id = ind;
+    thread_stats->dynm_req = 0;
+    thread_stats->stat_req = 0;
+    thread_stats->total_req = 0;
+
+    request* current_request;
+    while (1) {
+        pthread_mutex_lock(&mutex);
+        while (isEmpty(q)) {
+            pthread_cond_wait(&is_empty, &mutex);
+        }
+
+        current_request = dequeue(q);
+        pthread_cond_signal(&is_full);
+        pthread_mutex_unlock(&mutex);
+
+        struct timeval dispatch;
+        gettimeofday(&dispatch, NULL);
+
+        requestHandle(current_request->socket, current_request->arrival, dispatch,
+                      thread_stats, log);
+        Close(current_request->socket);
+    }
+    return NULL;
 }
 
 //
@@ -113,18 +163,6 @@ void getargs(int *port, int* threads_num , int* queue_size, int argc, char *argv
 }
 // TODO: HW3 — Initialize thread pool and request queue
 
-typedef struct {
-    Queue* request_queue;
-    server_log* log;
-    pthread_mutex_t* mutex;
-    pthread_cond_t* cond;
-    threads_stats t_stats;
-    int thread_id;
-} worker_args;
-
-extern pthread_mutex_t mutex;
-extern pthread_cond_t is_empty;
-extern pthread_cond_t is_full;
 
 
 // This server currently handles all requests in the main thread.
@@ -175,6 +213,7 @@ int main(int argc, char *argv[])
         struct timeval now;
         if (gettimeofday(&now, NULL) != 0) {
             perror("gettimeofday failed");
+            exit(1);
         }
 
 
@@ -189,7 +228,7 @@ int main(int argc, char *argv[])
     }
         // TODO: HW3 — Record the request arrival time here
 
-        // DEMO PURPOSE ONLY:
+        /*// DEMO PURPOSE ONLY:
         // This is a dummy request handler that immediately processes
         // the request in the main thread without concurrency.
         // Replace this with logic to enqueue the connection and let
@@ -212,42 +251,14 @@ int main(int argc, char *argv[])
         free(t); // Cleanup
         Close(connfd); // Close the connection
         // Clean up the server log before exiting
-        destroy_log(log);
-    }
+        destroy_log(log);*/
+    destroy_queue(request_queue);
+    destroy_log(log);
+    free(threads);
+    return 0;
+}
+
 
 
     // TODO: HW3 — Add cleanup code for thread pool and queue
 
-
-void* worker(void* arg_struct) {
-    worker_args* args = (worker_args*)arg_struct;
-
-    Queue* q = args->request_queue;
-    server_log* log = args->log;
-    threads_stats thread_stats = args->t_stats;
-    int ind = args->thread_id;
-
-    thread_stats->id = ind;
-    thread_stats->dynm_req = 0;
-    thread_stats->stat_req = 0;
-    thread_stats->total_req = 0;
-
-    request* current_request;
-    while (1) {
-        pthread_mutex_lock(&mutex);
-        while (isEmpty(q)) {
-            pthread_cond_wait(&is_empty, &mutex);
-        }
-
-        current_request = dequeue(q);
-        pthread_cond_signal(&is_full);
-        pthread_mutex_unlock(&mutex);
-
-        struct timeval now;
-        gettimeofday(&now, NULL);
-
-        requestHandle(current_request->socket, current_request->arrival, now,
-                      thread_stats, log);
-    }
-    return NULL;
-}
