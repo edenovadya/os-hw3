@@ -14,6 +14,7 @@ typedef struct {
     request* next_available;
     int size;
     int capacity;
+    int active_requests;
     request* arr;
     request* next_request;
 } Queue;
@@ -31,7 +32,6 @@ typedef struct {
 pthread_mutex_t mutex;
 pthread_cond_t is_empty;
 pthread_cond_t is_full;
-
 // ------------------------ Queue Functions ------------------------
 
 Queue* make_queue(int capacity) {
@@ -51,6 +51,7 @@ Queue* make_queue(int capacity) {
     q->next_available = q->arr;
     q->next_request = q->arr;
     q->size = 0;
+    q->active_requests = 0;
     return q;
 }
 
@@ -77,6 +78,7 @@ request* dequeue(Queue* q) {
         q->next_request = q->arr;
     }
     q->size--;
+    q->active_requests++;
     return ret;
 }
 
@@ -125,14 +127,18 @@ void* worker(void* arg_struct) {
 
         current_request = dequeue(q);
         pthread_cond_signal(&is_full);
+        struct timeval picked;
+        gettimeofday(&picked, NULL);
+        struct timeval dispatch_time;
+        timersub(&picked, &(current_request->arrival), &dispatch_time);
         pthread_mutex_unlock(&mutex);
 
-        struct timeval dispatch;
-        gettimeofday(&dispatch, NULL);
 
-        requestHandle(current_request->socket, current_request->arrival, dispatch,
+        requestHandle(current_request->socket, current_request->arrival, dispatch_time,
                       thread_stats, log);
+        q->active_requests--;
         Close(current_request->socket);
+        free(current_request);
     }
     return NULL;
 }
@@ -214,7 +220,7 @@ int main(int argc, char *argv[])
 
 
         pthread_mutex_lock(&mutex);
-        while (getSize(request_queue) >= queue_size) {
+        while (request_queue->capacity <= request_queue->size + request_queue->active_requests) {
             pthread_cond_wait(&is_full, &mutex);
         }
 
@@ -248,6 +254,9 @@ int main(int argc, char *argv[])
         Close(connfd); // Close the connection
         // Clean up the server log before exiting
         destroy_log(log);*/
+    for (int i=0; i<threads_num; i++) {
+        pthread_join(threads[i], NULL);
+    }
     destroy_queue(request_queue);
     destroy_log(log);
     free(threads);
