@@ -46,8 +46,12 @@ void writer_unlock(struct Server_Log* log) {
     pthread_mutex_lock(&log->mutex_log);
     log->writers_inside--;
     if (log->writers_inside == 0) { ///todo where is the writers preferance?
-        pthread_cond_broadcast(&log->read_allowed);
-        pthread_cond_signal(&log->write_allowed);
+        if(log->writers_waiting) {
+            pthread_cond_signal(&log->write_allowed);
+        }else {
+            pthread_cond_broadcast(&log->read_allowed);
+        }
+
     }
     pthread_mutex_unlock(&log->mutex_log);
 }

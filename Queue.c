@@ -36,7 +36,7 @@ void enqueue(Queue* q, int conffd, struct timeval time) {
     if (q->next_available == q->arr + q->capacity) {
         q->next_available = q->arr;
     }
-    
+
     q->size++;
 }
 

@@ -21,8 +21,6 @@ typedef struct {
 typedef struct {
     Queue* request_queue;
     server_log* log;
-    pthread_mutex_t* mutex;
-    pthread_cond_t* cond;
     threads_stats t_stats;
     int thread_id;
 } worker_args;
@@ -194,11 +192,9 @@ int main(int argc, char *argv[])
             exit(1);
         }
 
-        arg_to_worker->cond = &is_empty;
         arg_to_worker->thread_id = i;
         arg_to_worker->request_queue = request_queue;
         arg_to_worker->log = log;
-        arg_to_worker->mutex = &mutex;
 
         if (pthread_create(&threads[i], NULL, worker, arg_to_worker) != 0) {
             perror("pthread_create failed");
