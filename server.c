@@ -136,9 +136,11 @@ void* worker(void* arg_struct) {
 
         requestHandle(current_request->socket, current_request->arrival, dispatch_time,
                       thread_stats, log);
+        pthread_mutex_lock(&mutex);
         q->active_requests--;
+        pthread_mutex_unlock(&mutex);
         Close(current_request->socket);
-        free(current_request);
+
     }
     return NULL;
 }
