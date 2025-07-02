@@ -102,7 +102,69 @@ void destroy_queue(Queue* q) {
 }
 
 // ------------------------ Worker Function ------------------------
+// server.c (worker function)
 
+// ... (existing includes and structs)
+
+void* worker(void* arg_struct) {
+    worker_args* args = (worker_args*)arg_struct;
+
+    Queue* q = args->request_queue;
+    server_log* log = args->log;
+    threads_stats* thread_stats = args->t_stats;
+    int ind = args->thread_id;
+
+    free(args); // Free the worker_args struct itself, as its contents are copied
+
+    request* current_request;
+    while (1) {
+        pthread_mutex_lock(&mutex); // Acquire lock for queue access
+        while (isEmpty(q)) {
+            pthread_cond_wait(&is_empty, &mutex);
+        }
+
+        // Dequeue request
+        current_request = dequeue(q);
+        printf("Thread %d picked up request on fd %d\n", ind, current_request->socket); // Updated print message for clarity
+
+        // Calculate dispatch time (still safe under lock)
+        struct timeval picked;
+        gettimeofday(&picked, NULL);
+        struct timeval dispatch_time;
+        timersub(&picked, &(current_request->arrival), &dispatch_time);
+
+        // --- RELEASE THE MUTEX HERE before heavy work ---
+        pthread_mutex_unlock(&mutex);
+
+        // Perform request handling (I/O, CPU-bound, potentially blocking)
+        // This is where true concurrency happens, as the global queue mutex is not held.
+        requestHandle(current_request->socket, current_request->arrival, dispatch_time,
+                      thread_stats, log);
+
+        // --- Acquire mutex AGAIN only for updating queue/signaling state and Closing ---
+        pthread_mutex_lock(&mutex);
+
+        // Decrement active requests and signal condition variable
+        q->active_requests--;
+        pthread_cond_signal(&is_full); // Signal that the queue has space for new requests
+
+        // --- CRUCIAL CHANGE: Graceful Shutdown and then Close ---
+        // Ensure all pending data is sent to the client before truly closing the socket.
+        // This is vital for HTTP/1.0, where the server often initiates connection closure.
+        if (shutdown(current_request->socket, SHUT_WR) < 0) {
+            perror("Error during socket shutdown (SHUT_WR)");
+            // While an error here might indicate a problem, it's often not critical
+            // enough to crash the server for a single request, so we just log it.
+        }
+
+        // Now, we can safely close the socket's read and write ends.
+        Close(current_request->socket);
+
+        pthread_mutex_unlock(&mutex); // Release lock for queue access
+    }
+    return NULL;
+}
+/*
 void* worker(void* arg_struct) {
     worker_args* args = (worker_args*)arg_struct;
 
@@ -131,18 +193,19 @@ void* worker(void* arg_struct) {
         pthread_mutex_unlock(&mutex);
 
 
-        (current_request->socket, current_request->arrival, dispatch_time,
+        requestHandle(current_request->socket, current_request->arrival, dispatch_time,
                       thread_stats, log);
         pthread_mutex_lock(&mutex);
         q->active_requests--;
         pthread_cond_signal(&is_full);
-        pthread_mutex_unlock(&mutex);
         Close(current_request->socket);
+        pthread_mutex_unlock(&mutex);
+
 
     }
     return NULL;
 }
-
+*/
 //
 // server.c: A very, very simple web server
 //
@@ -192,7 +255,10 @@ int main(int argc, char *argv[])
     //create threads pool
     pthread_t* threads = malloc(threads_num * sizeof(pthread_t));
     threads_stats* stats = malloc( threads_num * sizeof(threads_stats));
-
+    if (!threads || !stats) {
+        perror("malloc failed");
+        exit(1);
+    }
     for (int i = 0; i < threads_num; i++) {
         worker_args *arg_to_worker = malloc(sizeof(worker_args));
         if (arg_to_worker == NULL) {

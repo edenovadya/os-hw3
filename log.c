@@ -152,7 +152,16 @@ int get_log(server_log* log, char** dst) {
 // Appends a new entry to the log (no-op stub)
 void add_to_log(server_log* log, const char* data, int data_len) {
     Node* new_node = malloc(sizeof(Node));
+    if (!new_node) {
+        perror("malloc failed");
+        exit(1);
+    }
     new_node->log_data = malloc(data_len + 1);
+    if (!new_node->log_data) {
+        perror("malloc failed");
+        exit(1);
+    }
+
     memcpy(new_node->log_data, data, data_len);
     new_node->log_data[data_len] = '\0';
     new_node->next = NULL;

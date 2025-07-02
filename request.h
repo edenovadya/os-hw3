@@ -29,4 +29,5 @@ typedef struct Threads_stats {
 void requestHandle(int fd, struct timeval arrival, struct timeval dispatch,
         threads_stats* t_stats, server_log* log);
 
+
 #endif
