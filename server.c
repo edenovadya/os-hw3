@@ -22,7 +22,7 @@ typedef struct {
 typedef struct {
     Queue* request_queue;
     server_log* log;
-    threads_stats t_stats;
+    threads_stats* t_stats;
     int thread_id;
 } worker_args;
 
@@ -108,15 +108,10 @@ void* worker(void* arg_struct) {
 
     Queue* q = args->request_queue;
     server_log* log = args->log;
-    threads_stats thread_stats = args->t_stats;
+    threads_stats* thread_stats = args->t_stats;
     int ind = args->thread_id;
 
     free(args);
-
-    thread_stats->id = ind;
-    thread_stats->dynm_req = 0;
-    thread_stats->stat_req = 0;
-    thread_stats->total_req = 0;
 
     request* current_request;
     while (1) {
@@ -126,7 +121,9 @@ void* worker(void* arg_struct) {
         }
 
         current_request = dequeue(q);
-        pthread_cond_signal(&is_full);
+        printf("Thread %d completed request on fd %d\n", ind, current_request->socket);
+
+
         struct timeval picked;
         gettimeofday(&picked, NULL);
         struct timeval dispatch_time;
@@ -134,10 +131,11 @@ void* worker(void* arg_struct) {
         pthread_mutex_unlock(&mutex);
 
 
-        requestHandle(current_request->socket, current_request->arrival, dispatch_time,
+        (current_request->socket, current_request->arrival, dispatch_time,
                       thread_stats, log);
         pthread_mutex_lock(&mutex);
         q->active_requests--;
+        pthread_cond_signal(&is_full);
         pthread_mutex_unlock(&mutex);
         Close(current_request->socket);
 
@@ -188,23 +186,33 @@ int main(int argc, char *argv[])
     // Create the global server log
     server_log* log = create_log();
 
-    //creat queue
+    //create queue
     Queue* request_queue = make_queue(queue_size);
 
-    //creat threads pool
-    pthread_t *threads = malloc(threads_num * sizeof(pthread_t));
+    //create threads pool
+    pthread_t* threads = malloc(threads_num * sizeof(pthread_t));
+    threads_stats* stats = malloc( threads_num * sizeof(threads_stats));
+
     for (int i = 0; i < threads_num; i++) {
         worker_args *arg_to_worker = malloc(sizeof(worker_args));
         if (arg_to_worker == NULL) {
             perror("malloc failed");
             exit(1);
         }
+        threads_stats* thread_stat =  &stats[i];
+        //threads_stats *thread_stat = &stats[i];
+        thread_stat->id = i;             // Thread ID (placeholder)
+        thread_stat->stat_req = 0;       // Static request count
+        thread_stat->dynm_req = 0;       // Dynamic request count
+        thread_stat->total_req = 0;      // Total request count
 
         arg_to_worker->thread_id = i;
         arg_to_worker->request_queue = request_queue;
         arg_to_worker->log = log;
+        arg_to_worker->t_stats = thread_stat;
 
         if (pthread_create(&threads[i], NULL, worker, arg_to_worker) != 0) {
+            free(arg_to_worker);
             perror("pthread_create failed");
             exit(1);
         }
@@ -213,6 +221,7 @@ int main(int argc, char *argv[])
     listenfd = Open_listenfd(port);
     while (1) {
         clientlen = sizeof(clientaddr);
+        //accept
         connfd = Accept(listenfd, (SA *)&clientaddr, (socklen_t *) &clientlen);
         struct timeval now;
         if (gettimeofday(&now, NULL) != 0) {
@@ -222,7 +231,7 @@ int main(int argc, char *argv[])
 
 
         pthread_mutex_lock(&mutex);
-        while (request_queue->capacity <= request_queue->size + request_queue->active_requests) {
+        while (request_queue->capacity <= (request_queue->size + request_queue->active_requests)) {
             pthread_cond_wait(&is_full, &mutex);
         }
 
@@ -230,38 +239,16 @@ int main(int argc, char *argv[])
         pthread_cond_signal(&is_empty);
         pthread_mutex_unlock(&mutex);
     }
-        // TODO: HW3 — Record the request arrival time here
 
-        /*// DEMO PURPOSE ONLY:
-        // This is a dummy request handler that immediately processes
-        // the request in the main thread without concurrency.
-        // Replace this with logic to enqueue the connection and let
-        // a worker thread process it from the queue.
 
-        threads_stats t = malloc(sizeof(struct Threads_stats));
-        t->id = 0;             // Thread ID (placeholder)
-        t->stat_req = 0;       // Static request count
-        t->dynm_req = 0;       // Dynamic request count
-        t->total_req = 0;      // Total request count
-
-        struct timeval arrival, dispatch;
-        arrival.tv_sec = 0; arrival.tv_usec = 0;   // DEMO: dummy timestamps
-        dispatch.tv_sec = 0; dispatch.tv_usec = 0; // DEMO: dummy timestamps
-        // gettimeofday(&arrival, NULL);
-
-        // Call the request handler (immediate in main thread — DEMO ONLY)
-        requestHandle(connfd, arrival, dispatch, t, log);
-
-        free(t); // Cleanup
         Close(connfd); // Close the connection
-        // Clean up the server log before exiting
-        destroy_log(log);*/
-    for (int i=0; i<threads_num; i++) {
+        destroy_log(log);
+        for (int i = 0; i < threads_num; i++) {
         pthread_join(threads[i], NULL);
     }
     destroy_queue(request_queue);
-    destroy_log(log);
     free(threads);
+    free(stats); // Cleanup
     return 0;
 }
 

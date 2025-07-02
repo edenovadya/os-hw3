@@ -5,7 +5,7 @@
 #include "segel.h"
 #include "request.h"
 
-int append_stats(char* buf, threads_stats t_stats, struct timeval arrival, struct timeval dispatch){
+int append_stats(char* buf, threads_stats* t_stats, struct timeval arrival,  struct timeval dispatch){
     int offset = strlen(buf);  // Start after what's already written to buf
 
     offset += sprintf(buf + offset, "Stat-Req-Arrival:: %ld.%06ld\r\n",
@@ -53,7 +53,7 @@ void requestError(int fd, char *cause, char *errnum, char *shortmsg, char *longm
 
 	sprintf(buf, "Content-Length: %lu\r\n", strlen(body));
 
-    int buf_len = append_stats(buf, t_stats, arrival, dispatch);
+    int buf_len = append_stats(buf, &t_stats, arrival, dispatch);
 
 	Rio_writen(fd, buf, buf_len);
 	printf("%s", buf);
@@ -132,7 +132,7 @@ int requestServeDynamic(int fd, char *filename, char *cgiargs, struct timeval
 	// The CGI script has to finish writing out the header.
 	sprintf(buf, "HTTP/1.0 200 OK\r\n");
 	sprintf(buf, "%sServer: OS-HW3 Web Server\r\n", buf);
-    buf_len = append_stats(buf, t_stats, arrival, dispatch);
+    buf_len = append_stats(buf, &t_stats, arrival, dispatch);
 
 
     Rio_writen(fd, buf, buf_len);
@@ -169,7 +169,7 @@ int requestServeStatic(int fd, char *filename, int filesize, struct timeval
 	sprintf(buf, "%sServer: OS-HW3 Web Server\r\n", buf);
 	sprintf(buf, "%sContent-Length: %d\r\n", buf, filesize);
 	sprintf(buf, "%sContent-Type: %s\r\n", buf, filetype);
-    int buf_len = append_stats(buf, t_stats, arrival, dispatch);
+    int buf_len = append_stats(buf, &t_stats, arrival, dispatch);
     Rio_writen(fd, buf, buf_len);
 
 	//  Writes out to the client socket the memory-mapped file
@@ -188,7 +188,7 @@ void requestServePost(int fd,  struct timeval arrival, struct timeval
     sprintf(header, "%sServer: OS-HW3 Web Server\r\n", header);
     sprintf(header, "%sContent-Length: %d\r\n", header, body_len);
     sprintf(header, "%sContent-Type: %s\r\n", header, "text/plain");
-    int header_len = append_stats(header, t_stats, arrival, dispatch);
+    int header_len = append_stats(header, &t_stats, arrival, dispatch);
     Rio_writen(fd, header, header_len);
     Rio_writen(fd, body, body_len);
     free(body);
@@ -196,7 +196,7 @@ void requestServePost(int fd,  struct timeval arrival, struct timeval
 
 // handle a request
 void requestHandle(int fd, struct timeval arrival, struct timeval dispatch,
-        threads_stats t_stats, server_log* log)
+        threads_stats* t_stats, server_log* log)
 {
     // TODO:  should update static request stats
     int is_static;
@@ -210,6 +210,11 @@ void requestHandle(int fd, struct timeval arrival, struct timeval dispatch,
     Rio_readinitb(&rio, fd);
     Rio_readlineb(&rio, buf, MAXLINE);
     sscanf(buf, "%s %s %s", method, uri, version);
+//    fprintf(stderr, "test");
+
+    t_stats->total_req++;
+
+
 
     if (!strcasecmp(method, "GET")) {
         requestReadhdrs(&rio);
@@ -218,35 +223,46 @@ void requestHandle(int fd, struct timeval arrival, struct timeval dispatch,
         if (stat(filename, &sbuf) < 0) {
             requestError(fd, filename, "404", "Not found",
                          "OS-HW3 Server could not find this file",
-                         arrival, dispatch, t_stats);
+                         arrival, dispatch, *t_stats);
             return;
+        }
+        if(is_static){
+            printf("Logging static request by thread %d\n", t_stats->id);
+        }else{
+            printf("Logging dynamic request by thread %d\n", t_stats->id);
         }
 
         if (is_static) {
-        	t_stats->total_req++;
+        	//t_stats->total_req++;
+//			printf("== filename: %s\n", filename);
+//			printf("== access R_OK: %d\n", access(filename, R_OK));
+//			printf("== sbuf.st_mode: %o\n", sbuf.st_mode);
+//            printf("== sbuf.st_mode: %o\n",access(filename, R_OK));
 
-            if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
+            if (!(S_ISREG(sbuf.st_mode)) || access(filename, R_OK) != 0) {
                 requestError(fd, filename, "403", "Forbidden",
                              "OS-HW3 Server could not read this file",
-                             arrival, dispatch, t_stats);
+                             arrival, dispatch, *t_stats);
                 return;
             }
         	t_stats->stat_req++;
 
             log_buff_len = requestServeStatic(fd, filename, sbuf.st_size,
-                                              arrival, dispatch,t_stats,log_buff);
+                                              arrival, dispatch,*t_stats,
+                                              log_buff);
 
         } else {
-        	t_stats->total_req++;
+//			printf("isDynemic");
+        	//t_stats->total_req++;
             if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
                 requestError(fd, filename, "403", "Forbidden",
                              "OS-HW3 Server could not run this CGI program",
-                             arrival, dispatch, t_stats);
+                             arrival, dispatch, *t_stats);
                 return;
             }
         	t_stats->dynm_req++;
             log_buff_len = requestServeDynamic(fd, filename, cgiargs, arrival,
-                                         dispatch, t_stats,log_buff);
+                                         dispatch, *t_stats,log_buff);
         }
         //TODO what if there are errors?
     	add_to_log(log, log_buff, log_buff_len);
@@ -254,14 +270,14 @@ void requestHandle(int fd, struct timeval arrival, struct timeval dispatch,
         // TODO: add log entry using add_to_log(server_log log, const char* data, int data_len);
 
     } else if (!strcasecmp(method, "POST")) {
-    	t_stats->total_req++;
+    	//t_stats->total_req++;
     	t_stats->post_req++;
-        requestServePost(fd, arrival, dispatch, t_stats, log);
+        requestServePost(fd, arrival, dispatch, *t_stats, log);
 
     } else {
         requestError(fd, method, "501", "Not Implemented",
                      "OS-HW3 Server does not implement this method",
-                     arrival, dispatch, t_stats);
+                     arrival, dispatch, *t_stats);
         return;
     }
 }
