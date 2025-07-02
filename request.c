@@ -239,7 +239,7 @@ void requestHandle(int fd, struct timeval arrival, struct timeval dispatch,
 //			printf("== sbuf.st_mode: %o\n", sbuf.st_mode);
 //            printf("== sbuf.st_mode: %o\n",access(filename, R_OK));
 
-            if (!(S_ISREG(sbuf.st_mode)) || access(filename, R_OK) != 0) {
+            if (!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)) {
                 requestError(fd, filename, "403", "Forbidden",
                              "OS-HW3 Server could not read this file",
                              arrival, dispatch, *t_stats);
