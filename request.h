@@ -9,7 +9,7 @@ typedef struct Threads_stats {
     int dynm_req;     // Number of dynamic requests handled
     int post_req;     // Number of POST requests handled
     int total_req;    // Total number of requests handled
-} * threads_stats;
+}  threads_stats;
 
 // Handles a client request.
 // - fd: the connection socket
@@ -27,6 +27,7 @@ typedef struct Threads_stats {
 // - These values should reflect accurate request processing for each thread and be used in response headers/logs.
 
 void requestHandle(int fd, struct timeval arrival, struct timeval dispatch,
-        threads_stats t_stats, server_log* log);
+        threads_stats* t_stats, server_log* log);
+
 
 #endif

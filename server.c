@@ -22,7 +22,7 @@ typedef struct {
 typedef struct {
     Queue* request_queue;
     server_log* log;
-    threads_stats t_stats;
+    threads_stats* t_stats;
     int thread_id;
 } worker_args;
 
@@ -102,21 +102,78 @@ void destroy_queue(Queue* q) {
 }
 
 // ------------------------ Worker Function ------------------------
+// server.c (worker function)
+
+// ... (existing includes and structs)
 
 void* worker(void* arg_struct) {
     worker_args* args = (worker_args*)arg_struct;
 
     Queue* q = args->request_queue;
     server_log* log = args->log;
-    threads_stats thread_stats = args->t_stats;
+    threads_stats* thread_stats = args->t_stats;
+    int ind = args->thread_id;
+
+    free(args); // Free the worker_args struct itself, as its contents are copied
+
+    request* current_request;
+    while (1) {
+        pthread_mutex_lock(&mutex); // Acquire lock for queue access
+        while (isEmpty(q)) {
+            pthread_cond_wait(&is_empty, &mutex);
+        }
+
+        // Dequeue request
+        current_request = dequeue(q);
+        printf("Thread %d picked up request on fd %d\n", ind, current_request->socket); // Updated print message for clarity
+
+        // Calculate dispatch time (still safe under lock)
+        struct timeval picked;
+        gettimeofday(&picked, NULL);
+        struct timeval dispatch_time;
+        timersub(&picked, &(current_request->arrival), &dispatch_time);
+
+        // --- RELEASE THE MUTEX HERE before heavy work ---
+        pthread_mutex_unlock(&mutex);
+
+        // Perform request handling (I/O, CPU-bound, potentially blocking)
+        // This is where true concurrency happens, as the global queue mutex is not held.
+        requestHandle(current_request->socket, current_request->arrival, dispatch_time,
+                      thread_stats, log);
+
+        // --- Acquire mutex AGAIN only for updating queue/signaling state and Closing ---
+        pthread_mutex_lock(&mutex);
+
+        // Decrement active requests and signal condition variable
+        q->active_requests--;
+        pthread_cond_signal(&is_full); // Signal that the queue has space for new requests
+
+        // --- CRUCIAL CHANGE: Graceful Shutdown and then Close ---
+        // Ensure all pending data is sent to the client before truly closing the socket.
+        // This is vital for HTTP/1.0, where the server often initiates connection closure.
+        if (shutdown(current_request->socket, SHUT_WR) < 0) {
+            perror("Error during socket shutdown (SHUT_WR)");
+            // While an error here might indicate a problem, it's often not critical
+            // enough to crash the server for a single request, so we just log it.
+        }
+
+        // Now, we can safely close the socket's read and write ends.
+        Close(current_request->socket);
+
+        pthread_mutex_unlock(&mutex); // Release lock for queue access
+    }
+    return NULL;
+}
+/*
+void* worker(void* arg_struct) {
+    worker_args* args = (worker_args*)arg_struct;
+
+    Queue* q = args->request_queue;
+    server_log* log = args->log;
+    threads_stats* thread_stats = args->t_stats;
     int ind = args->thread_id;
 
     free(args);
-
-    thread_stats->id = ind;
-    thread_stats->dynm_req = 0;
-    thread_stats->stat_req = 0;
-    thread_stats->total_req = 0;
 
     request* current_request;
     while (1) {
@@ -126,7 +183,9 @@ void* worker(void* arg_struct) {
         }
 
         current_request = dequeue(q);
-        pthread_cond_signal(&is_full);
+        printf("Thread %d completed request on fd %d\n", ind, current_request->socket);
+
+
         struct timeval picked;
         gettimeofday(&picked, NULL);
         struct timeval dispatch_time;
@@ -138,13 +197,15 @@ void* worker(void* arg_struct) {
                       thread_stats, log);
         pthread_mutex_lock(&mutex);
         q->active_requests--;
-        pthread_mutex_unlock(&mutex);
+        pthread_cond_signal(&is_full);
         Close(current_request->socket);
+        pthread_mutex_unlock(&mutex);
+
 
     }
     return NULL;
 }
-
+*/
 //
 // server.c: A very, very simple web server
 //
@@ -188,23 +249,36 @@ int main(int argc, char *argv[])
     // Create the global server log
     server_log* log = create_log();
 
-    //creat queue
+    //create queue
     Queue* request_queue = make_queue(queue_size);
 
-    //creat threads pool
-    pthread_t *threads = malloc(threads_num * sizeof(pthread_t));
+    //create threads pool
+    pthread_t* threads = malloc(threads_num * sizeof(pthread_t));
+    threads_stats* stats = malloc( threads_num * sizeof(threads_stats));
+    if (!threads || !stats) {
+        perror("malloc failed");
+        exit(1);
+    }
     for (int i = 0; i < threads_num; i++) {
         worker_args *arg_to_worker = malloc(sizeof(worker_args));
         if (arg_to_worker == NULL) {
             perror("malloc failed");
             exit(1);
         }
+        threads_stats* thread_stat =  &stats[i];
+        //threads_stats *thread_stat = &stats[i];
+        thread_stat->id = i;             // Thread ID (placeholder)
+        thread_stat->stat_req = 0;       // Static request count
+        thread_stat->dynm_req = 0;       // Dynamic request count
+        thread_stat->total_req = 0;      // Total request count
 
         arg_to_worker->thread_id = i;
         arg_to_worker->request_queue = request_queue;
         arg_to_worker->log = log;
+        arg_to_worker->t_stats = thread_stat;
 
         if (pthread_create(&threads[i], NULL, worker, arg_to_worker) != 0) {
+            free(arg_to_worker);
             perror("pthread_create failed");
             exit(1);
         }
@@ -213,6 +287,7 @@ int main(int argc, char *argv[])
     listenfd = Open_listenfd(port);
     while (1) {
         clientlen = sizeof(clientaddr);
+        //accept
         connfd = Accept(listenfd, (SA *)&clientaddr, (socklen_t *) &clientlen);
         struct timeval now;
         if (gettimeofday(&now, NULL) != 0) {
@@ -222,7 +297,7 @@ int main(int argc, char *argv[])
 
 
         pthread_mutex_lock(&mutex);
-        while (request_queue->capacity <= request_queue->size + request_queue->active_requests) {
+        while (request_queue->capacity <= (request_queue->size + request_queue->active_requests)) {
             pthread_cond_wait(&is_full, &mutex);
         }
 
@@ -230,38 +305,16 @@ int main(int argc, char *argv[])
         pthread_cond_signal(&is_empty);
         pthread_mutex_unlock(&mutex);
     }
-        // TODO: HW3 — Record the request arrival time here
 
-        /*// DEMO PURPOSE ONLY:
-        // This is a dummy request handler that immediately processes
-        // the request in the main thread without concurrency.
-        // Replace this with logic to enqueue the connection and let
-        // a worker thread process it from the queue.
 
-        threads_stats t = malloc(sizeof(struct Threads_stats));
-        t->id = 0;             // Thread ID (placeholder)
-        t->stat_req = 0;       // Static request count
-        t->dynm_req = 0;       // Dynamic request count
-        t->total_req = 0;      // Total request count
-
-        struct timeval arrival, dispatch;
-        arrival.tv_sec = 0; arrival.tv_usec = 0;   // DEMO: dummy timestamps
-        dispatch.tv_sec = 0; dispatch.tv_usec = 0; // DEMO: dummy timestamps
-        // gettimeofday(&arrival, NULL);
-
-        // Call the request handler (immediate in main thread — DEMO ONLY)
-        requestHandle(connfd, arrival, dispatch, t, log);
-
-        free(t); // Cleanup
         Close(connfd); // Close the connection
-        // Clean up the server log before exiting
-        destroy_log(log);*/
-    for (int i=0; i<threads_num; i++) {
+        destroy_log(log);
+        for (int i = 0; i < threads_num; i++) {
         pthread_join(threads[i], NULL);
     }
     destroy_queue(request_queue);
-    destroy_log(log);
     free(threads);
+    free(stats); // Cleanup
     return 0;
 }
 
